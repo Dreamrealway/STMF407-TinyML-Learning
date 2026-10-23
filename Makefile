@@ -51,6 +51,7 @@ HARDWARE/TOUCH/gt9147.c \
 HARDWARE/TOUCH/ott2001a.c \
 HARDWARE/TOUCH/touch.c \
 HARDWARE/SRAM/sram.c \
+HARDWARE/TINYML/tinyml.c \
 HALLIB/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc.c \
 HALLIB/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_rcc_ex.c \
 HALLIB/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_flash.c \
@@ -73,6 +74,10 @@ HALLIB/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_spi.c \
 HALLIB/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_sram.c \
 HALLIB/STM32F4xx_HAL_Driver/Src/stm32f4xx_ll_fsmc.c
 
+# C++ 源文件
+CPP_SOURCES = \
+HARDWARE/TINYML/tinyml_infer.cpp \
+
 
 # ASM sources
 ASM_SOURCES =  \
@@ -92,6 +97,7 @@ CC = $(GCC_PATH)/$(PREFIX)gcc
 AS = $(GCC_PATH)/$(PREFIX)gcc -x assembler-with-cpp
 CP = $(GCC_PATH)/$(PREFIX)objcopy
 SZ = $(GCC_PATH)/$(PREFIX)size
+CXX = $(GCC_PATH)/$(PREFIX)g++ # C++支持
 else
 CC = $(PREFIX)gcc
 AS = $(PREFIX)gcc -x assembler-with-cpp
@@ -146,12 +152,17 @@ C_INCLUDES =  \
 -IHARDWARE/LED \
 -IHARDWARE/TOUCH \
 -IHARDWARE/SRAM \
+-IHARDWARE/TINYML \
+-I../tflite-micro \
+-I../tflite-micro/tensorflow/lite/micro/tools/make/downloads/flatbuffers/include \
 
 
 # compile gcc flags
 ASFLAGS = $(MCU) $(AS_DEFS) $(AS_INCLUDES) $(OPT) -Wall -fdata-sections -ffunction-sections
 
-CFLAGS += $(MCU) $(C_DEFS) $(C_INCLUDES) $(OPT) -Wall -fdata-sections -ffunction-sections
+CFLAGS += $(MCU) $(C_DEFS) $(C_INCLUDES) $(OPT) -Wall -fdata-sections -ffunction-sections # -DTF_LITE_STATIC_MEMORY TFLM 推荐的宏 千万不要加
+
+CXXFLAGS += -std=gnu++17 -fno-rtti -fno-exceptions -fno-threadsafe-statics 
 
 ifeq ($(DEBUG), 1)
 CFLAGS += -g -gdwarf-2
@@ -169,9 +180,12 @@ CFLAGS += -MMD -MP -MF"$(@:%.o=%.d)"
 LDSCRIPT = STM32F407ZGTX_FLASH.ld
 
 # libraries
-LIBS = -lc -lm -lnosys 
+LIBS = -lc -lm 
+LIBS += -L./HARDWARE/TINYML/LIB 
+LIBS += -ltensorflow-microlite 
+LIBS += -lstdc++ 
 LIBDIR = 
-LDFLAGS = $(MCU) -specs=nano.specs -T$(LDSCRIPT) $(LIBDIR) -u _printf_float $(LIBS) -Wl,-Map=$(BUILD_DIR)/$(TARGET).map,--cref -Wl,--gc-sections
+LDFLAGS = $(MCU) -specs=nano.specs -specs=nosys.specs -T$(LDSCRIPT) $(LIBDIR) -u _printf_float $(LIBS) -Wl,-Map=$(BUILD_DIR)/$(TARGET).map,--cref -Wl,--gc-sections
 
 # default action: build all
 all: $(BUILD_DIR)/$(TARGET).elf $(BUILD_DIR)/$(TARGET).hex $(BUILD_DIR)/$(TARGET).bin
@@ -187,6 +201,9 @@ vpath %.c $(sort $(dir $(C_SOURCES)))
 # list of ASM program objects
 OBJECTS += $(addprefix $(BUILD_DIR)/,$(notdir $(ASM_SOURCES:.s=.o)))
 vpath %.s $(sort $(dir $(ASM_SOURCES)))
+# list of C++ program objects
+OBJECTS += $(addprefix $(BUILD_DIR)/,$(notdir $(CPP_SOURCES:.cpp=.o)))
+vpath %.cpp $(sort $(dir $(CPP_SOURCES)))
 
 $(BUILD_DIR)/%.o: %.c Makefile | $(BUILD_DIR) 
 	$(CC) -c $(CFLAGS) -Wa,-a,-ad,-alms=$(BUILD_DIR)/$(notdir $(<:.c=.lst)) $< -o $@
@@ -194,8 +211,12 @@ $(BUILD_DIR)/%.o: %.c Makefile | $(BUILD_DIR)
 $(BUILD_DIR)/%.o: %.s Makefile | $(BUILD_DIR)
 	$(AS) -c $(CFLAGS) $< -o $@
 
+# C++ 编译规则
+$(BUILD_DIR)/%.o: %.cpp Makefile | $(BUILD_DIR)
+	$(CXX) -c $(CXXFLAGS) $(CFLAGS) $< -o $@
+
 $(BUILD_DIR)/$(TARGET).elf: $(OBJECTS) Makefile
-	$(CC) $(OBJECTS) $(LDFLAGS) -o $@
+	$(CXX) $(OBJECTS) $(LDFLAGS) -o $@
 	$(SZ) $@
 
 $(BUILD_DIR)/%.hex: $(BUILD_DIR)/%.elf | $(BUILD_DIR)
